@@ -6,3 +6,4 @@ python-dotenv
 aiofiles
 requests[socks]
 pysocks
+bgutil-ytdlp-pot-provider

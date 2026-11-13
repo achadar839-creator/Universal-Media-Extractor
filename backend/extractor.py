@@ -103,7 +103,7 @@ def fetch_tiktok_via_api(url):
 def base_options():
     options = {
         "quiet": True,
-        "extractor_args": {"youtube": {"player_client": ["mweb", "web", "tv"]}},
+        "extractor_args": {"youtube": {"player_client": ["android_vr", "ios", "tv", "web"]}},
         "no_warnings": True,
         "socket_timeout": 30,
         "extractor_retries": 5,
@@ -121,7 +121,7 @@ def base_options():
         options["proxy"] = custom_proxy
 
     if os.path.isfile(COOKIE_FILE) and os.path.getsize(COOKIE_FILE) > 0:
-        options["cookiefile"] = COOKIE_FILE
+        # options["cookiefile"] = COOKIE_FILE
 
     return options
 
