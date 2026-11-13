@@ -8,7 +8,8 @@ from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
 
 DOWNLOAD_DIR = "downloads"
-import shutil
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
 if os.path.isfile("/etc/secrets/youtube-cookies.txt"):
     with open("/etc/secrets/youtube-cookies.txt", "r", encoding="utf-8", errors="ignore") as src, open("/tmp/youtube-cookies.txt", "w", encoding="utf-8") as dst:
         for line in src:
@@ -23,7 +24,6 @@ if os.path.isfile("/etc/secrets/youtube-cookies.txt"):
     COOKIE_FILE = "/tmp/youtube-cookies.txt"
 else:
     COOKIE_FILE = os.path.abspath("private/youtube-cookies.txt")
-os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 
 def is_tor_running(host="127.0.0.1", port=9050):
@@ -50,12 +50,10 @@ def is_tiktok_url(url):
 
 def validate_url(url):
     parsed = urlparse(url)
-
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         raise ValueError("Invalid URL")
 
     host = parsed.hostname.lower()
-
     if host == "localhost" or host.endswith((".local", ".internal")):
         raise ValueError("Local address blocked")
 
@@ -76,11 +74,14 @@ def validate_url(url):
 
 
 def fetch_tiktok_via_api(url):
-    """TikTok के Tor ब्लॉक से बचने के लिए डायरेक्ट हाई-स्पीड एक्सट्रैक्टर"""
+    """TikTok के ब्लॉक से बचने के लिए डायरेक्ट हाई-स्पीड एक्सट्रैक्टर"""
     api_url = "https://www.tikwm.com/api/"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+    }
     try:
-        resp = requests.post(api_url, data={"url": url, "hd": 1}, headers=headers, timeout=20)
+        resp = requests.post(api_url, data={"url": url, "hd": 1}, headers=headers, timeout=25)
         data = resp.json()
     except Exception:
         proxy = get_proxy_url()
@@ -91,7 +92,7 @@ def fetch_tiktok_via_api(url):
             data={"url": url, "hd": 1},
             headers=headers,
             proxies={"http": proxy, "https": proxy},
-            timeout=25
+            timeout=30
         )
         data = resp.json()
 
@@ -103,50 +104,80 @@ def fetch_tiktok_via_api(url):
 def base_options():
     options = {
         "quiet": True,
-        "extractor_args": {"youtube": {"player_client": ["android_vr", "tv", "ios", "mweb"]}},
         "no_warnings": True,
         "socket_timeout": 30,
         "extractor_retries": 5,
         "geo_bypass": True,
         "nocheckcertificate": True,
-        "js_runtimes": {"deno": {"path": "/usr/local/bin/deno"}},
-        "remote_components": ["ejs:github"],
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9",
+        },
     }
-
     custom_proxy = os.getenv("PROXY_URL")
     if custom_proxy:
         options["proxy"] = custom_proxy
-
     return options
 
 
 def extract_with_fallback(url, options, download=False):
-    # Step 1: Try cookieless with mobile/VR clients
+    # Render और क्लाउड सर्वर पर बिना कुकीज़ के काम करने वाले अलग-अलग क्लाइंट्स की लिस्ट
+    client_profiles = [
+        ["tv_embedded", "ios"],
+        ["ios", "android_vr"],
+        ["mweb", "tv"],
+        ["android", "web_embedded"],
+    ]
+
+    last_error = None
+
+    # Step 1: एक-एक करके हर क्लाइंट प्रोफाइल को आज़माएं
+    for clients in client_profiles:
+        try:
+            try_opts = dict(options)
+            try_opts["extractor_args"] = {
+                "youtube": {
+                    "player_client": clients,
+                    "player_skip": ["webpage", "configs"],
+                }
+            }
+            with YoutubeDL(try_opts) as ydl:
+                return ydl.extract_info(url, download=download)
+        except DownloadError as e:
+            last_error = e
+            continue
+
+    # Step 2: बिना किसी कस्टम player_skip के डिफ़ॉल्ट एक्सट्रैक्शन आज़माएं
     try:
-        with YoutubeDL(options) as ydl:
+        default_opts = dict(options)
+        default_opts["extractor_args"] = {"youtube": {"player_client": ["ios", "tv", "mweb"]}}
+        with YoutubeDL(default_opts) as ydl:
             return ydl.extract_info(url, download=download)
     except DownloadError as e:
-        err_msg = str(e).lower()
+        last_error = e
 
-        # Step 2: If blocked and cookie file exists, try with cookies
-        if os.path.isfile(COOKIE_FILE) and os.path.getsize(COOKIE_FILE) > 0:
-            try:
-                cookie_opts = dict(options)
-                cookie_opts["cookiefile"] = COOKIE_FILE
-                cookie_opts["extractor_args"] = {"youtube": {"player_client": ["tv", "mweb", "web"]}}
-                with YoutubeDL(cookie_opts) as ydl:
-                    return ydl.extract_info(url, download=download)
-            except DownloadError:
-                pass
-
-        # Step 3: Try via Tor / Proxy if available
-        proxy = get_proxy_url()
-        if proxy and not options.get("proxy"):
-            proxy_opts = dict(options)
-            proxy_opts["proxy"] = proxy
-            with YoutubeDL(proxy_opts) as ydl:
+    # Step 3: अगर कुकी फाइल मौजूद है, तो कुकीज़ के साथ आज़माएं
+    if os.path.isfile(COOKIE_FILE) and os.path.getsize(COOKIE_FILE) > 0:
+        try:
+            cookie_opts = dict(options)
+            cookie_opts["cookiefile"] = COOKIE_FILE
+            cookie_opts["extractor_args"] = {"youtube": {"player_client": ["tv", "mweb", "web"]}}
+            with YoutubeDL(cookie_opts) as ydl:
                 return ydl.extract_info(url, download=download)
-        raise
+        except DownloadError as e:
+            last_error = e
+
+    # Step 4: अगर Tor या Proxy उपलब्ध है, तो उसके ज़रिए आज़माएं
+    proxy = get_proxy_url()
+    if proxy and not options.get("proxy"):
+        proxy_opts = dict(options)
+        proxy_opts["proxy"] = proxy
+        with YoutubeDL(proxy_opts) as ydl:
+            return ydl.extract_info(url, download=download)
+
+    if last_error:
+        raise last_error
+    raise ValueError("Unable to extract video information")
 
 
 def get_info(url):
@@ -194,18 +225,14 @@ def get_info(url):
     options = base_options()
     options["noplaylist"] = False
     options["extract_flat"] = "in_playlist"
-
     info = extract_with_fallback(url, options, download=False)
 
     if info.get("_type") in ("playlist", "multi_video") or info.get("entries"):
         entries = []
-
         for entry in info.get("entries") or []:
             if not entry:
                 continue
-
             video_url = entry.get("webpage_url") or entry.get("url") or ""
-
             if video_url and not video_url.startswith(("http://", "https://")):
                 video_url = "https://www.youtube.com/watch?v=" + video_url
 
@@ -226,7 +253,6 @@ def get_info(url):
         }
 
     formats = []
-
     for f in info.get("formats", []):
         if f.get("url") and (f.get("height") or f.get("acodec") != "none"):
             formats.append({
@@ -302,7 +328,6 @@ def download_media(url, format_id="best", audio=False):
                 ),
                 None,
             )
-
             if selected and selected.get("acodec") == "none":
                 selected_format = f"{selected_format}+bestaudio/best"
         else:
