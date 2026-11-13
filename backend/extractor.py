@@ -120,8 +120,7 @@ def base_options():
     if custom_proxy:
         options["proxy"] = custom_proxy
 
-    if os.path.isfile(COOKIE_FILE) and os.path.getsize(COOKIE_FILE) > 0:
-        # # options["cookiefile"] = COOKIE_FILE
+    # if os.path.isfile(COOKIE_FILE) and os.path.getsize(COOKIE_FILE) > 0:
 
     return options
 
