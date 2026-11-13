@@ -8,7 +8,12 @@ from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
 
 DOWNLOAD_DIR = "downloads"
-COOKIE_FILE = "/etc/secrets/youtube-cookies.txt" if os.path.isfile("/etc/secrets/youtube-cookies.txt") else os.path.abspath("private/youtube-cookies.txt")
+import shutil
+if os.path.isfile("/etc/secrets/youtube-cookies.txt"):
+    shutil.copyfile("/etc/secrets/youtube-cookies.txt", "/tmp/youtube-cookies.txt")
+    COOKIE_FILE = "/tmp/youtube-cookies.txt"
+else:
+    COOKIE_FILE = os.path.abspath("private/youtube-cookies.txt")
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 
