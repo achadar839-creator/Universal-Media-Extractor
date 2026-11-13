@@ -1,8 +1,13 @@
 fastapi
 uvicorn
-yt-dlp
+yt-dlp[default]
 python-multipart
 python-dotenv
+pydantic
+httpx
 aiofiles
-requests[socks]
-pysocks
+slowapi
+firebase-admin
+stripe
+requests
+Pillow
