@@ -1,7 +1,6 @@
 import os
-import glob
 import asyncio
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, HttpUrl
@@ -22,6 +21,14 @@ class DownloadRequest(BaseModel):
     audio: bool = False
 
 
+def remove_file(path: str):
+    try:
+        if os.path.isfile(path):
+            os.remove(path)
+    except OSError:
+        pass
+
+
 @app.get("/")
 async def home():
     return FileResponse("frontend/index.html")
@@ -36,30 +43,24 @@ async def info(data: URLRequest):
 
 
 @app.post("/api/download")
-async def download(data: DownloadRequest):
+async def download(data: DownloadRequest, background_tasks: BackgroundTasks):
     try:
-        existing = set(glob.glob("downloads/*"))
-
-        await asyncio.to_thread(
+        filepath = await asyncio.to_thread(
             download_media,
             str(data.url),
             data.format_id,
             data.audio
         )
 
-        files = [
-            f for f in glob.glob("downloads/*")
-            if f not in existing and os.path.isfile(f)
-        ]
+        clean_name = os.path.basename(filepath)
+        if "_" in clean_name:
+            clean_name = clean_name.split("_", 1)[1]
 
-        if not files:
-            raise Exception("New download file not found")
-
-        latest = max(files, key=os.path.getmtime)
+        background_tasks.add_task(remove_file, filepath)
 
         return FileResponse(
-            latest,
-            filename=os.path.basename(latest),
+            filepath,
+            filename=clean_name,
             media_type="application/octet-stream"
         )
 

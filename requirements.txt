@@ -4,3 +4,5 @@ yt-dlp
 python-multipart
 python-dotenv
 aiofiles
+requests[socks]
+pysocks
