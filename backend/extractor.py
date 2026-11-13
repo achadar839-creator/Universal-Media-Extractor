@@ -94,6 +94,7 @@ def fetch_tiktok_via_api(url):
 def base_options():
     options = {
         "quiet": True,
+        "extractor_args": {"youtube": {"player_client": ["mweb", "web", "tv"]}},
         "no_warnings": True,
         "socket_timeout": 30,
         "extractor_retries": 5,
