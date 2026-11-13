@@ -1,8 +1,12 @@
 venv/
-.env
+.venv/
 __pycache__/
-downloads/*
-temp/*
-cookies/
-*.cookies
 *.pyc
+.env
+private/
+cookies/
+*cookies*.txt
+downloads/
+*.mp4
+*.mp3
+*.part

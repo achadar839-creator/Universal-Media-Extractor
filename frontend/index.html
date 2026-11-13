@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Universal Media Extractor</title>
+<link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+<header>
+<div class="logo">UNIVERSAL<span>EXTRACTOR</span></div>
+<div class="badge">MEDIA ENGINE ONLINE</div>
+</header>
+
+<main>
+<section class="hero">
+<div class="tag">NEXT GENERATION MEDIA TOOL</div>
+<h1>UNIVERSAL MEDIA<br><span>EXTRACTOR</span></h1>
+<p>Extract and download media from supported public URLs.</p>
+
+<div class="panel">
+<label for="url">PASTE MEDIA URL</label>
+<div class="input-row">
+<input id="url" type="url" placeholder="YouTube / Playlist / Spotify URL">
+<button id="inspect">ANALYZE</button>
+</div>
+<div id="status"></div>
+</div>
+
+<div id="result" class="result hidden">
+<img id="thumbnail" alt="Media thumbnail">
+<h2 id="title"></h2>
+<p id="details"></p>
+
+<div id="singleControls">
+<label for="format">SELECT FORMAT</label>
+<select id="format"></select>
+<div class="buttons">
+<button id="videoDownload">DOWNLOAD VIDEO</button>
+<button id="audioDownload" class="secondary">DOWNLOAD MP3</button>
+</div>
+</div>
+
+<div id="playlistControls" class="hidden">
+<h3>PLAYLIST VIDEOS</h3>
+<div class="select-row">
+<label><input type="checkbox" id="selectAll"> SELECT ALL</label>
+<span id="selectedCount">0 selected</span>
+</div>
+<div id="playlistItems"></div>
+<div class="buttons">
+<button id="downloadSelected">DOWNLOAD SELECTED</button>
+<button id="downloadSelectedAudio" class="secondary">DOWNLOAD SELECTED MP3</button>
+</div>
+</div>
+</div>
+</section>
+</main>
+
+<footer>UNIVERSAL MEDIA EXTRACTOR · USE CONTENT YOU OWN OR ARE AUTHORIZED TO DOWNLOAD</footer>
+<script src="/static/js/script.js"></script>
+</body>
+</html>
