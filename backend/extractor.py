@@ -103,7 +103,7 @@ def fetch_tiktok_via_api(url):
 def base_options():
     options = {
         "quiet": True,
-        "extractor_args": {"youtube": {"player_client": ["android_vr", "ios", "tv", "web"]}},
+        "extractor_args": {"youtube": {"player_client": ["android_vr", "tv", "ios", "mweb"]}},
         "no_warnings": True,
         "socket_timeout": 30,
         "extractor_retries": 5,
@@ -111,31 +111,40 @@ def base_options():
         "nocheckcertificate": True,
         "js_runtimes": {"deno": {"path": "/usr/local/bin/deno"}},
         "remote_components": ["ejs:github"],
-        "http_headers": {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-        }
     }
 
     custom_proxy = os.getenv("PROXY_URL")
     if custom_proxy:
         options["proxy"] = custom_proxy
 
-    # if os.path.isfile(COOKIE_FILE) and os.path.getsize(COOKIE_FILE) > 0:
-
     return options
 
 
 def extract_with_fallback(url, options, download=False):
-    """बाकी सभी वेबसाइट्स के लिए: पहले डायरेक्ट चलाएगा, ब्लॉक होने पर Tor इस्तेमाल करेगा"""
+    # Step 1: Try cookieless with mobile/VR clients
     try:
         with YoutubeDL(options) as ydl:
             return ydl.extract_info(url, download=download)
     except DownloadError as e:
         err_msg = str(e).lower()
+
+        # Step 2: If blocked and cookie file exists, try with cookies
+        if os.path.isfile(COOKIE_FILE) and os.path.getsize(COOKIE_FILE) > 0:
+            try:
+                cookie_opts = dict(options)
+                cookie_opts["cookiefile"] = COOKIE_FILE
+                cookie_opts["extractor_args"] = {"youtube": {"player_client": ["tv", "mweb", "web"]}}
+                with YoutubeDL(cookie_opts) as ydl:
+                    return ydl.extract_info(url, download=download)
+            except DownloadError:
+                pass
+
+        # Step 3: Try via Tor / Proxy if available
         proxy = get_proxy_url()
-        if proxy and not options.get("proxy") and any(k in err_msg for k in ("timed out", "timeout", "connection", "unreachable", "reset by peer")):
-            options["proxy"] = proxy
-            with YoutubeDL(options) as ydl:
+        if proxy and not options.get("proxy"):
+            proxy_opts = dict(options)
+            proxy_opts["proxy"] = proxy
+            with YoutubeDL(proxy_opts) as ydl:
                 return ydl.extract_info(url, download=download)
         raise
 
