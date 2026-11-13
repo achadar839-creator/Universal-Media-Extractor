@@ -101,6 +101,31 @@ def fetch_tiktok_via_api(url):
     return data["data"]
 
 
+
+def fetch_youtube_via_public_api(url):
+    """Render/Cloud IP पर YouTube बॉट ब्लॉक से बचने के लिए पब्लिक Piped/Invidious फ़ॉलबैक"""
+    import re
+    m = re.search(r"(?:v=|youtu\.be/|shorts/)([A-Za-z0-9_-]{11})", url)
+    if not m:
+        raise ValueError("Invalid YouTube video ID")
+    vid_id = m.group(1)
+    instances = [
+        f"https://pipedapi.kavin.rocks/streams/{vid_id}",
+        f"https://pipedapi.tokhmi.xyz/streams/{vid_id}",
+        f"https://pipedapi.moomoo.me/streams/{vid_id}",
+    ]
+    headers = {"User-Agent": "Mozilla/5.0"}
+    for api in instances:
+        try:
+            r = requests.get(api, headers=headers, timeout=15)
+            if r.status_code == 200:
+                data = r.json()
+                if data.get("videoStreams") or data.get("audioStreams"):
+                    return vid_id, data
+        except Exception:
+            continue
+    raise ValueError("Cloud IP blocked by YouTube and backup APIs are busy")
+
 def base_options():
     options = {
         "quiet": True,
