@@ -10,7 +10,16 @@ from yt_dlp.utils import DownloadError
 DOWNLOAD_DIR = "downloads"
 import shutil
 if os.path.isfile("/etc/secrets/youtube-cookies.txt"):
-    shutil.copyfile("/etc/secrets/youtube-cookies.txt", "/tmp/youtube-cookies.txt")
+    with open("/etc/secrets/youtube-cookies.txt", "r", encoding="utf-8", errors="ignore") as src, open("/tmp/youtube-cookies.txt", "w", encoding="utf-8") as dst:
+        for line in src:
+            s = line.strip()
+            if not s or s.startswith("#"):
+                dst.write(line)
+            elif "\t" not in s and len(s.split()) >= 7:
+                parts = s.split(None, 6)
+                dst.write("\t".join(parts) + "\n")
+            else:
+                dst.write(line)
     COOKIE_FILE = "/tmp/youtube-cookies.txt"
 else:
     COOKIE_FILE = os.path.abspath("private/youtube-cookies.txt")
