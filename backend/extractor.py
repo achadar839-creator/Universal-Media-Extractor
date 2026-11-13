@@ -8,7 +8,7 @@ from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
 
 DOWNLOAD_DIR = "downloads"
-COOKIE_FILE = os.path.abspath("private/youtube-cookies.txt")
+COOKIE_FILE = "/etc/secrets/youtube-cookies.txt" if os.path.isfile("/etc/secrets/youtube-cookies.txt") else os.path.abspath("private/youtube-cookies.txt")
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 
@@ -94,7 +94,7 @@ def base_options():
         "extractor_retries": 5,
         "geo_bypass": True,
         "nocheckcertificate": True,
-        "js_runtimes": {"deno": {}},
+        "js_runtimes": {"deno": {"path": "/usr/local/bin/deno"}},
         "remote_components": ["ejs:github"],
         "http_headers": {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
