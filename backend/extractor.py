@@ -232,9 +232,9 @@ def extract_with_fallback(url, options, download=False):
 
     # Profile list ordered by reliability with Deno JS solver enabled
     yt_profiles = [
+        {"player_client": ["android_vr", "tv"]},
         {"player_client": ["tv", "mweb"]},
         {"player_client": ["ios", "web_safari"]},
-        {"player_client": ["android_vr", "tv"]},
     ]
 
     if is_youtube_url(url):
