@@ -217,7 +217,7 @@ def fetch_youtube_via_public_api(url):
         try:
             r = requests.post(
                 c_api,
-                json={"url": clean_watch_url, "videoQuality": "720"},
+                json={"url": clean_watch_url, "videoQuality": "max"},
                 headers={"Accept": "application/json", "Content-Type": "application/json", "User-Agent": "Mozilla/5.0"},
                 timeout=5,
             )
@@ -233,12 +233,12 @@ def fetch_youtube_via_public_api(url):
                         "duration": None,
                         "uploader": "YouTube",
                         "formats": [{
-                            "format_id": "cobalt_720",
+                            "format_id": "cobalt_max",
                             "url": dl_url,
                             "ext": "mp4",
-                            "height": 720,
+                            "height": 1080,
                             "filesize": None,
-                            "format_note": "720p HD",
+                            "format_note": "1080p/Max (Auto Bypass)", "has_video": True, "has_audio": True,
                             "vcodec": "h264",
                             "acodec": "aac",
                         }],
@@ -333,6 +333,15 @@ def base_options():
 
 def extract_with_fallback(url, options, download=False):
     last_error = None
+    # 🚀 KHARNAK JUGAD: Bypass Render IP Block by forcing Public APIs first
+    if is_youtube_url(url):
+        try:
+            api_data = fetch_youtube_via_public_api(url)
+            if api_data:
+                return api_data
+        except Exception:
+            pass
+
     cookie_file = _resolve_cookie_file()
 
     if is_youtube_url(url):
@@ -340,7 +349,7 @@ def extract_with_fallback(url, options, download=False):
             try:
                 cookie_opts = dict(options)
                 cookie_opts["cookiefile"] = cookie_file
-                cookie_opts["extractor_args"] = {"youtube": {"player_client": ["tv", "mweb", "web"]}}
+                cookie_opts["extractor_args"] = {"youtube": {"player_client": ["android", "ios"]}}
                 with YoutubeDL(cookie_opts) as ydl:
                     info = ydl.extract_info(url, download=download)
                 if download or _has_playable_media(info):
@@ -412,7 +421,7 @@ def get_info(url):
             formats.append({
                 "format_id": "sd",
                 "ext": "mp4",
-                "height": 720,
+                "height": 1080,
                 "filesize": tk.get("size"),
                 "note": "Standard (No Watermark)",
                 "has_audio": True,
@@ -422,7 +431,7 @@ def get_info(url):
             formats.append({
                 "format_id": "sd",
                 "ext": "mp4",
-                "height": 720,
+                "height": 1080,
                 "filesize": tk.get("size"),
                 "note": "Standard (No Watermark)",
                 "has_audio": True,
