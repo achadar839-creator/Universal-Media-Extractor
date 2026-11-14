@@ -65,12 +65,11 @@ $("inspect").addEventListener("click", async () => {
             $("format").appendChild(bestOpt);
 
             (data.formats || []).forEach(f => {
-                if (f.format_id === "best") return;
+                if (f.format_id === "best" || f.format_id === "audio" || f.has_video === false || !f.height) return;
                 const option = document.createElement("option");
                 option.value = f.format_id;
-                const res = f.height ? `${f.height}p` : "Audio";
-                const audioTag = f.has_video === false ? "Audio Only" : (f.has_audio ? "Video+Audio" : "HD Video (Auto-Audio)");
-                option.textContent = `${res} · ${(f.ext || "mp4").toUpperCase()} · ${audioTag}${formatBytes(f.filesize)}`;
+                const audioTag = f.has_audio ? "Video + Audio" : "HD Video (Auto-Audio)";
+                option.textContent = `${f.height}p · ${(f.ext || "mp4").toUpperCase()} · ${audioTag}${formatBytes(f.filesize)}`;
                 $("format").appendChild(option);
             });
         }

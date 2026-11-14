@@ -76,8 +76,9 @@ def _has_playable_media(info):
 def fetch_tiktok_via_api(url):
     api_url = "https://www.tikwm.com/api/"
     headers = {
-        "User-Agent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124.0.0.0 Mobile Safari/537.36",
-        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Origin": "https://www.tikwm.com",
         "Referer": "https://www.tikwm.com/",
     }
 
@@ -93,7 +94,13 @@ def fetch_tiktok_via_api(url):
             response.raise_for_status()
             result = response.json()
             if result.get("code") == 0 and result.get("data"):
-                return result["data"]
+                data = result["data"]
+                # Normalize relative paths from TikWM
+                for key in ("hdplay", "play", "wmplay", "music", "cover"):
+                    val = data.get(key)
+                    if isinstance(val, str) and val.startswith("/"):
+                        data[key] = "https://www.tikwm.com" + val
+                return data
             last_error = result.get("msg") or "TikWM returned no video data"
         except Exception as exc:
             last_error = str(exc)
@@ -128,7 +135,7 @@ def fetch_tiktok_via_api(url):
             "hdplay": best.get("url") or info.get("url"),
             "play": sd.get("url") or best.get("url") or info.get("url"),
             "music": audio.get("url"),
-            "_fallback_formats": formats,
+            "_use_ytdlp": True,
         }
     except Exception as fallback_error:
         raise ValueError(
@@ -142,16 +149,60 @@ def fetch_youtube_via_public_api(url):
     if not m:
         raise ValueError("Invalid YouTube video ID")
     vid_id = m.group(1)
-    instances = [
+    clean_watch_url = f"https://www.youtube.com/watch?v={vid_id}"
+
+    # 1. Try Cobalt public API instances (best for Render / Cloud IPs)
+    cobalt_instances = [
+        "https://api.cobalt.tools/",
+        "https://cobalt-api.kwiatekmiki.com/",
+        "https://cobalt.api.timelessnesses.me/",
+    ]
+    for c_api in cobalt_instances:
+        try:
+            r = requests.post(
+                c_api,
+                json={"url": clean_watch_url, "videoQuality": "720"},
+                headers={"Accept": "application/json", "Content-Type": "application/json", "User-Agent": "Mozilla/5.0"},
+                timeout=12,
+            )
+            if r.status_code == 200:
+                cdata = r.json()
+                dl_url = cdata.get("url")
+                if dl_url:
+                    return {
+                        "id": vid_id,
+                        "extractor": "youtube",
+                        "title": cdata.get("filename") or f"YouTube_{vid_id}",
+                        "thumbnail": f"https://i.ytimg.com/vi/{vid_id}/hqdefault.jpg",
+                        "duration": None,
+                        "uploader": "YouTube",
+                        "formats": [{
+                            "format_id": "cobalt_720",
+                            "url": dl_url,
+                            "ext": "mp4",
+                            "height": 720,
+                            "filesize": None,
+                            "format_note": "720p HD",
+                            "vcodec": "h264",
+                            "acodec": "aac",
+                        }],
+                        "_via_public_api": True,
+                        "_cobalt_url": clean_watch_url,
+                    }
+        except Exception:
+            continue
+
+    # 2. Try Piped / Invidious public instances
+    piped_instances = [
         f"https://pipedapi.kavin.rocks/streams/{vid_id}",
-        f"https://pipedapi.tokhmi.xyz/streams/{vid_id}",
-        f"https://pipedapi.moomoo.me/streams/{vid_id}",
-        f"https://pipedapi.syncpundit.io/streams/{vid_id}",
+        f"https://pipedapi.adminforge.de/streams/{vid_id}",
+        f"https://api.piped.private.coffee/streams/{vid_id}",
+        f"https://pipedapi.darkness.services/streams/{vid_id}",
     ]
     headers = {"User-Agent": "Mozilla/5.0"}
-    for api in instances:
+    for api in piped_instances:
         try:
-            r = requests.get(api, headers=headers, timeout=15)
+            r = requests.get(api, headers=headers, timeout=12)
             if r.status_code == 200:
                 data = r.json()
                 if data.get("videoStreams") or data.get("audioStreams"):
@@ -191,7 +242,7 @@ def fetch_youtube_via_public_api(url):
                         "id": vid_id,
                         "extractor": "youtube",
                         "title": data.get("title") or f"YouTube_{vid_id}",
-                        "thumbnail": data.get("thumbnailUrl"),
+                        "thumbnail": data.get("thumbnailUrl") or f"https://i.ytimg.com/vi/{vid_id}/hqdefault.jpg",
                         "duration": data.get("duration"),
                         "uploader": data.get("uploader"),
                         "formats": formats,
@@ -199,7 +250,8 @@ def fetch_youtube_via_public_api(url):
                     }
         except Exception:
             continue
-    raise ValueError("Cloud IP blocked by YouTube and backup APIs are busy")
+
+    raise ValueError("Cloud IP blocked by YouTube. Add youtube-cookies.txt in Render Secrets for 100% uptime.")
 
 
 def base_options():
@@ -212,7 +264,7 @@ def base_options():
         "nocheckcertificate": True,
         "remote_components": ["ejs:github"],
         "http_headers": {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
             "Accept-Language": "en-US,en;q=0.9",
         },
     }
@@ -230,7 +282,6 @@ def extract_with_fallback(url, options, download=False):
     last_error = None
     cookie_file = _resolve_cookie_file()
 
-    # Profile list ordered by reliability with Deno JS solver enabled
     yt_profiles = [
         {"player_client": ["android_vr", "tv"]},
         {"player_client": ["tv", "mweb"]},
@@ -238,7 +289,6 @@ def extract_with_fallback(url, options, download=False):
     ]
 
     if is_youtube_url(url):
-        # Step 1: If valid cookies exist, try with cookies first
         if cookie_file:
             try:
                 cookie_opts = dict(options)
@@ -251,7 +301,6 @@ def extract_with_fallback(url, options, download=False):
             except Exception as e:
                 last_error = e
 
-        # Step 2: Try Deno-backed client profiles (without player_skip so Deno solves JS challenges)
         for yt_arg in yt_profiles:
             try:
                 try_opts = dict(options)
@@ -265,7 +314,6 @@ def extract_with_fallback(url, options, download=False):
                 last_error = e
                 continue
 
-    # Step 3: Standard default extraction (works for Instagram, Facebook, X, SoundCloud, etc.)
     try:
         default_opts = dict(options)
         if cookie_file and not is_youtube_url(url):
@@ -277,7 +325,6 @@ def extract_with_fallback(url, options, download=False):
     except Exception as e:
         last_error = e
 
-    # Step 4: Tor / Proxy fallback
     proxy = get_proxy_url()
     if proxy and not options.get("proxy"):
         try:
@@ -290,7 +337,6 @@ def extract_with_fallback(url, options, download=False):
         except Exception as e:
             last_error = e
 
-    # Step 5: Public API fallback for YouTube
     if is_youtube_url(url):
         try:
             return fetch_youtube_via_public_api(url)
@@ -316,6 +362,7 @@ def get_info(url):
                 "filesize": tk.get("hd_size"),
                 "note": "HD (No Watermark)",
                 "has_audio": True,
+                "has_video": True,
             })
         if tk.get("play") and tk.get("play") != tk.get("hdplay"):
             formats.append({
@@ -325,6 +372,7 @@ def get_info(url):
                 "filesize": tk.get("size"),
                 "note": "Standard (No Watermark)",
                 "has_audio": True,
+                "has_video": True,
             })
         elif not formats and tk.get("play"):
             formats.append({
@@ -334,15 +382,7 @@ def get_info(url):
                 "filesize": tk.get("size"),
                 "note": "Standard (No Watermark)",
                 "has_audio": True,
-            })
-        if tk.get("music"):
-            formats.append({
-                "format_id": "audio",
-                "ext": "mp3",
-                "height": None,
-                "filesize": None,
-                "note": "Audio Only (MP3)",
-                "has_audio": True,
+                "has_video": True,
             })
         return {
             "type": "video",
@@ -393,13 +433,14 @@ def get_info(url):
         has_url = bool(f.get("url") or f.get("manifest_url"))
         has_video = bool(f.get("height") or (f.get("vcodec") and f.get("vcodec") != "none"))
         has_audio = bool(f.get("acodec") and f.get("acodec") != "none")
-        if not has_url or not (has_video or has_audio):
+        # Only keep video formats in dropdown (audio is handled by DOWNLOAD MP3 button)
+        if not has_url or not has_video or not f.get("height"):
             continue
 
         height = f.get("height")
         fid = str(f.get("format_id"))
-        dedup_key = (height, ext, has_audio, f.get("format_note") or "")
-        if dedup_key in seen_keys and height:
+        dedup_key = (height, ext, has_audio)
+        if dedup_key in seen_keys:
             continue
         seen_keys.add(dedup_key)
 
@@ -408,14 +449,13 @@ def get_info(url):
             "ext": ext or "mp4",
             "height": height,
             "filesize": f.get("filesize") or f.get("filesize_approx"),
-            "note": f.get("format_note") or ("Audio Only" if not has_video else "Video"),
+            "note": f.get("format_note") or "Video",
             "has_audio": has_audio,
-            "has_video": has_video,
+            "has_video": True,
         })
 
     formats.sort(
         key=lambda x: (
-            1 if x.get("has_video") else 0,
             x.get("height") or 0,
             1 if x.get("has_audio") else 0,
             x.get("filesize") or 0,
@@ -423,35 +463,25 @@ def get_info(url):
         reverse=True,
     )
 
-    if not formats:
-        formats.append({
-            "format_id": "best",
-            "ext": "mp4",
-            "height": 720,
-            "filesize": None,
-            "note": "Best Available Quality",
-            "has_audio": True,
-            "has_video": True,
-        })
-
     return {
         "type": "video",
         "title": info.get("title") or "Media",
         "thumbnail": info.get("thumbnail"),
         "duration": info.get("duration"),
         "uploader": info.get("uploader") or info.get("channel") or "Unknown",
-        "formats": formats[:40],
+        "formats": formats[:30],
     }
 
 
 def _stream_download_to_file(media_url, filepath, headers=None):
     req_headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36",
+        "Accept": "*/*",
     }
     if headers:
         req_headers.update(headers)
     try:
-        r = requests.get(media_url, stream=True, headers=req_headers, timeout=30)
+        r = requests.get(media_url, stream=True, headers=req_headers, timeout=30, allow_redirects=True)
         r.raise_for_status()
     except Exception:
         proxy = get_proxy_url()
@@ -461,6 +491,7 @@ def _stream_download_to_file(media_url, filepath, headers=None):
             headers=req_headers,
             proxies={"http": proxy, "https": proxy} if proxy else None,
             timeout=60,
+            allow_redirects=True,
         )
         r.raise_for_status()
     with r:
@@ -480,28 +511,52 @@ def download_media(url, format_id="best", audio=False):
         vid_id = sanitize_filename(str(tk.get("id") or "video"))
 
         if audio or format_id == "audio":
-            media_url = tk.get("music") or tk.get("play") or tk.get("hdplay")
+            candidates = [tk.get("music"), tk.get("play"), tk.get("hdplay")]
             ext = "mp3" if tk.get("music") else "mp4"
-        elif format_id == "hd" and tk.get("hdplay"):
-            media_url = tk.get("hdplay")
+        elif format_id == "hd":
+            candidates = [tk.get("hdplay"), tk.get("play"), tk.get("wmplay")]
             ext = "mp4"
         else:
-            media_url = tk.get("play") or tk.get("hdplay")
+            candidates = [tk.get("play"), tk.get("hdplay"), tk.get("wmplay")]
             ext = "mp4"
 
-        if not media_url:
-            raise ValueError("Direct media stream not found for this TikTok")
-
-        if media_url.startswith("/"):
-            media_url = "https://www.tikwm.com" + media_url
-
+        candidates = [c for c in candidates if c]
         filepath = os.path.join(DOWNLOAD_DIR, f"{unique_prefix}_TikTok_{vid_id}.{ext}")
-        _stream_download_to_file(media_url, filepath, headers={"Referer": "https://www.tiktok.com/"})
-        return filepath
+
+        # Try direct stream from TikWM/CDN candidates with proper TikTok Referer
+        for media_url in candidates:
+            try:
+                _stream_download_to_file(
+                    media_url,
+                    filepath,
+                    headers={"Referer": "https://www.tiktok.com/", "Origin": "https://www.tiktok.com"},
+                )
+                if os.path.isfile(filepath) and os.path.getsize(filepath) > 1024:
+                    return filepath
+            except Exception:
+                continue
+
+        # Fallback: let yt-dlp download TikTok directly if CDN returned 403
+        yt_opts = base_options()
+        yt_opts.update({
+            "outtmpl": os.path.join(DOWNLOAD_DIR, f"{unique_prefix}_TikTok_{vid_id}.%(ext)s"),
+            "format": "bestaudio/best" if audio else "best",
+            "noplaylist": True,
+        })
+        if audio:
+            yt_opts["postprocessors"] = [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}]
+        with YoutubeDL(yt_opts) as ydl:
+            ydl.extract_info(url, download=True)
+        for fname in os.listdir(DOWNLOAD_DIR):
+            if fname.startswith(unique_prefix) and not fname.endswith((".part", ".ytdl")):
+                fp = os.path.join(DOWNLOAD_DIR, fname)
+                if os.path.isfile(fp) and os.path.getsize(fp) > 0:
+                    return fp
+        raise ValueError("TikTok CDN blocked direct download (403) and yt-dlp fallback failed")
 
     if audio:
         selected_format = "bestaudio/best"
-    elif format_id and format_id != "best" and not str(format_id).startswith("piped_"):
+    elif format_id and format_id != "best" and not str(format_id).startswith(("piped_", "cobalt_")):
         selected_format = f"{format_id}+bestaudio/{format_id}/bestvideo+bestaudio/best"
     else:
         selected_format = "bestvideo+bestaudio/best"
