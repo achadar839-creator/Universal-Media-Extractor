@@ -75,33 +75,70 @@ def validate_url(url):
 
 
 def fetch_tiktok_via_api(url):
-    """TikTok के ब्लॉक से बचने के लिए डायरेक्ट हाई-स्पीड एक्सट्रैक्टर"""
+    """TikWM API with retries and yt-dlp fallback."""
+    import time
+
     api_url = "https://www.tikwm.com/api/"
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/javascript, */*; q=0.01",
+        "User-Agent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124.0.0.0 Mobile Safari/537.36",
+        "Accept": "application/json",
+        "Referer": "https://www.tikwm.com/",
     }
+
+    last_error = None
+    for attempt in range(3):
+        try:
+            response = requests.post(
+                api_url,
+                data={"url": url, "hd": 1},
+                headers=headers,
+                timeout=(10, 45),
+            )
+            response.raise_for_status()
+            result = response.json()
+            if result.get("code") == 0 and result.get("data"):
+                return result["data"]
+            last_error = result.get("msg") or "TikWM returned no video data"
+        except Exception as exc:
+            last_error = str(exc)
+        if attempt < 2:
+            time.sleep(2)
+
+    # Fallback: use yt-dlp directly if TikWM is unreachable.
     try:
-        resp = requests.post(api_url, data={"url": url, "hd": 1}, headers=headers, timeout=25)
-        data = resp.json()
-    except Exception:
-        proxy = get_proxy_url()
-        if not proxy:
-            raise ValueError("Unable to connect to TikTok extractor service")
-        resp = requests.post(
-            api_url,
-            data={"url": url, "hd": 1},
-            headers=headers,
-            proxies={"http": proxy, "https": proxy},
-            timeout=30
+        opts = base_options()
+        opts.update({"noplaylist": True, "format": "best"})
+        with YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+
+        formats = [
+            f for f in info.get("formats", [])
+            if f.get("url") and f.get("vcodec") != "none"
+        ]
+        formats.sort(key=lambda f: f.get("height") or 0, reverse=True)
+        best = formats[0] if formats else {}
+        audio = next(
+            (f for f in info.get("formats", [])
+             if f.get("url") and f.get("vcodec") == "none"
+             and f.get("acodec") != "none"),
+            {}
         )
-        data = resp.json()
-
-    if data.get("code") != 0 or not data.get("data"):
-        raise ValueError(data.get("msg") or "Unable to fetch TikTok video")
-    return data["data"]
-
-
+        return {
+            "id": info.get("id"),
+            "title": info.get("title"),
+            "cover": info.get("thumbnail"),
+            "duration": info.get("duration"),
+            "author": {"nickname": info.get("uploader") or "TikTok Creator"},
+            "hdplay": best.get("url"),
+            "play": best.get("url"),
+            "music": audio.get("url"),
+            "_fallback_formats": formats,
+        }
+    except Exception as fallback_error:
+        raise ValueError(
+            f"TikTok extraction failed. TikWM: {last_error}. "
+            f"yt-dlp fallback: {fallback_error}"
+        )
 
 def fetch_youtube_via_public_api(url):
     """Render/Cloud IP पर YouTube बॉट ब्लॉक से बचने के लिए पब्लिक Piped/Invidious फ़ॉलबैक"""
