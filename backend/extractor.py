@@ -1,4 +1,5 @@
 import os
+import shutil
 import uuid
 import socket
 import ipaddress
@@ -134,11 +135,16 @@ def base_options():
         "extractor_retries": 5,
         "geo_bypass": True,
         "nocheckcertificate": True,
+        "remote_components": ["ejs:github"],
         "http_headers": {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
             "Accept-Language": "en-US,en;q=0.9",
         },
     }
+    deno_path = shutil.which("deno")
+    if deno_path:
+        options["js_runtimes"] = {"deno": {"path": deno_path}}
+
     custom_proxy = os.getenv("PROXY_URL")
     if custom_proxy:
         options["proxy"] = custom_proxy
