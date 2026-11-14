@@ -6,8 +6,5 @@ python-dotenv
 pydantic
 httpx
 aiofiles
-slowapi
-firebase-admin
-stripe
 requests
-Pillow
+PySocks

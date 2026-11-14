@@ -9,4 +9,8 @@ cookies/
 downloads/
 *.mp4
 *.mp3
+*.m4a
+*.webm
 *.part
+*.log
+diagnostic-report.txt

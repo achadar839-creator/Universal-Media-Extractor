@@ -4,29 +4,39 @@ import time
 import shutil
 import uuid
 import socket
-import ipaddress
 import requests
-from urllib.parse import urlparse
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
+from backend.security import is_tiktok_url, is_youtube_url, validate_url, sanitize_filename
 
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-if os.path.isfile("/etc/secrets/youtube-cookies.txt"):
-    with open("/etc/secrets/youtube-cookies.txt", "r", encoding="utf-8", errors="ignore") as src, open("/tmp/youtube-cookies.txt", "w", encoding="utf-8") as dst:
-        for line in src:
-            s = line.strip()
-            if not s or s.startswith("#"):
-                dst.write(line)
-            elif "\t" not in s and len(s.split()) >= 7:
-                parts = s.split(None, 6)
-                dst.write("\t".join(parts) + "\n")
-            else:
-                dst.write(line)
-    COOKIE_FILE = "/tmp/youtube-cookies.txt"
-else:
-    COOKIE_FILE = os.path.abspath("private/youtube-cookies.txt")
+
+def _resolve_cookie_file():
+    candidates = [
+        "/etc/secrets/youtube-cookies.txt",
+        os.path.abspath("private/youtube-cookies.txt"),
+        os.path.abspath("cookies/youtube.cookies"),
+    ]
+    for candidate in candidates:
+        if os.path.isfile(candidate) and os.path.getsize(candidate) > 0:
+            target = "/tmp/youtube-cookies.txt"
+            try:
+                with open(candidate, "r", encoding="utf-8", errors="ignore") as src, open(target, "w", encoding="utf-8") as dst:
+                    for line in src:
+                        s = line.strip()
+                        if not s or s.startswith("#"):
+                            dst.write(line)
+                        elif "\t" not in s and len(s.split()) >= 7:
+                            parts = s.split(None, 6)
+                            dst.write("\t".join(parts) + "\n")
+                        else:
+                            dst.write(line)
+                return target
+            except OSError:
+                return candidate
+    return None
 
 
 def is_tor_running(host="127.0.0.1", port=9050):
@@ -46,43 +56,24 @@ def get_proxy_url():
     return None
 
 
-def is_tiktok_url(url):
-    host = (urlparse(url).hostname or "").lower()
-    return any(host == d or host.endswith("." + d) for d in ("tiktok.com", "vt.tiktok.com", "vm.tiktok.com", "douyin.com"))
-
-
-def is_youtube_url(url):
-    host = (urlparse(url).hostname or "").lower()
-    return any(host == d or host.endswith("." + d) for d in ("youtube.com", "youtu.be", "m.youtube.com", "music.youtube.com"))
-
-
-def validate_url(url):
-    parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https") or not parsed.hostname:
-        raise ValueError("Invalid URL")
-
-    host = parsed.hostname.lower()
-    if host == "localhost" or host.endswith((".local", ".internal")):
-        raise ValueError("Local address blocked")
-
-    if is_tiktok_url(url):
-        return url
-
-    try:
-        addresses = socket.getaddrinfo(host, None)
-        for item in addresses:
-            ip = ipaddress.ip_address(item[4][0])
-            if not ip.is_global:
-                raise ValueError("Private address blocked")
-    except socket.gaierror:
-        if not get_proxy_url():
-            raise ValueError("Unable to resolve website")
-
-    return url
+def _has_playable_media(info):
+    if not info or not isinstance(info, dict):
+        return False
+    if info.get("_type") in ("playlist", "multi_video") or info.get("entries"):
+        return True
+    if info.get("_via_public_api"):
+        return bool(info.get("formats"))
+    for f in info.get("formats") or []:
+        ext = (f.get("ext") or "").lower()
+        if ext in ("mhtml", "none") or f.get("vcodec") == "images":
+            continue
+        if f.get("url") or f.get("manifest_url"):
+            if f.get("height") or (f.get("acodec") and f.get("acodec") != "none") or (f.get("vcodec") and f.get("vcodec") != "none"):
+                return True
+    return bool(info.get("url"))
 
 
 def fetch_tiktok_via_api(url):
-    """TikWM API with retries and yt-dlp fallback."""
     api_url = "https://www.tikwm.com/api/"
     headers = {
         "User-Agent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124.0.0.0 Mobile Safari/537.36",
@@ -97,7 +88,7 @@ def fetch_tiktok_via_api(url):
                 api_url,
                 data={"url": url, "hd": 1},
                 headers=headers,
-                timeout=(10, 45),
+                timeout=(10, 35),
             )
             response.raise_for_status()
             result = response.json()
@@ -107,7 +98,7 @@ def fetch_tiktok_via_api(url):
         except Exception as exc:
             last_error = str(exc)
         if attempt < 2:
-            time.sleep(2)
+            time.sleep(1.5)
 
     try:
         opts = base_options()
@@ -147,8 +138,7 @@ def fetch_tiktok_via_api(url):
 
 
 def fetch_youtube_via_public_api(url):
-    """Public Piped API fallback when cloud IP is blocked by YouTube."""
-    m = re.search(r"(?:v=|youtu\.be/|shorts/|embed/)([A-Za-z0-9_-]{11})", url)
+    m = re.search(r"(?:v=|youtu\.be/|shorts/|embed/|live/)([A-Za-z0-9_-]{11})", url)
     if not m:
         raise ValueError("Invalid YouTube video ID")
     vid_id = m.group(1)
@@ -217,7 +207,7 @@ def base_options():
         "quiet": True,
         "no_warnings": True,
         "socket_timeout": 30,
-        "extractor_retries": 5,
+        "extractor_retries": 3,
         "geo_bypass": True,
         "nocheckcertificate": True,
         "remote_components": ["ejs:github"],
@@ -237,53 +227,55 @@ def base_options():
 
 
 def extract_with_fallback(url, options, download=False):
-    client_profiles = [
-        ["tv_embedded", "ios"],
-        ["ios", "android_vr"],
-        ["mweb", "tv"],
-        ["android", "web_embedded"],
+    last_error = None
+    cookie_file = _resolve_cookie_file()
+
+    # Profile list ordered by reliability with Deno JS solver enabled
+    yt_profiles = [
+        {"player_client": ["tv", "mweb"]},
+        {"player_client": ["ios", "web_safari"]},
+        {"player_client": ["android_vr", "tv"]},
     ]
 
-    last_error = None
-
-    # Step 1: Try client profiles if YouTube URL
     if is_youtube_url(url):
-        for clients in client_profiles:
+        # Step 1: If valid cookies exist, try with cookies first
+        if cookie_file:
+            try:
+                cookie_opts = dict(options)
+                cookie_opts["cookiefile"] = cookie_file
+                cookie_opts["extractor_args"] = {"youtube": {"player_client": ["tv", "mweb", "web"]}}
+                with YoutubeDL(cookie_opts) as ydl:
+                    info = ydl.extract_info(url, download=download)
+                if download or _has_playable_media(info):
+                    return info
+            except Exception as e:
+                last_error = e
+
+        # Step 2: Try Deno-backed client profiles (without player_skip so Deno solves JS challenges)
+        for yt_arg in yt_profiles:
             try:
                 try_opts = dict(options)
-                try_opts["extractor_args"] = {
-                    "youtube": {
-                        "player_client": clients,
-                        "player_skip": ["webpage", "configs"],
-                    }
-                }
+                try_opts["extractor_args"] = {"youtube": yt_arg}
                 with YoutubeDL(try_opts) as ydl:
-                    return ydl.extract_info(url, download=download)
+                    info = ydl.extract_info(url, download=download)
+                if download or _has_playable_media(info):
+                    return info
+                last_error = ValueError("No playable formats returned by client profile")
             except Exception as e:
                 last_error = e
                 continue
 
-    # Step 2: Default extraction
+    # Step 3: Standard default extraction (works for Instagram, Facebook, X, SoundCloud, etc.)
     try:
         default_opts = dict(options)
-        if is_youtube_url(url):
-            default_opts["extractor_args"] = {"youtube": {"player_client": ["ios", "tv", "mweb"]}}
+        if cookie_file and not is_youtube_url(url):
+            default_opts["cookiefile"] = cookie_file
         with YoutubeDL(default_opts) as ydl:
-            return ydl.extract_info(url, download=download)
+            info = ydl.extract_info(url, download=download)
+        if download or _has_playable_media(info):
+            return info
     except Exception as e:
         last_error = e
-
-    # Step 3: Cookie file fallback
-    if os.path.isfile(COOKIE_FILE) and os.path.getsize(COOKIE_FILE) > 0:
-        try:
-            cookie_opts = dict(options)
-            cookie_opts["cookiefile"] = COOKIE_FILE
-            if is_youtube_url(url):
-                cookie_opts["extractor_args"] = {"youtube": {"player_client": ["tv", "mweb", "web"]}}
-            with YoutubeDL(cookie_opts) as ydl:
-                return ydl.extract_info(url, download=download)
-        except Exception as e:
-            last_error = e
 
     # Step 4: Tor / Proxy fallback
     proxy = get_proxy_url()
@@ -292,7 +284,9 @@ def extract_with_fallback(url, options, download=False):
             proxy_opts = dict(options)
             proxy_opts["proxy"] = proxy
             with YoutubeDL(proxy_opts) as ydl:
-                return ydl.extract_info(url, download=download)
+                info = ydl.extract_info(url, download=download)
+            if download or _has_playable_media(info):
+                return info
         except Exception as e:
             last_error = e
 
@@ -305,11 +299,11 @@ def extract_with_fallback(url, options, download=False):
 
     if last_error:
         raise last_error
-    raise ValueError("Unable to extract video information")
+    raise ValueError("Unable to extract media information from the provided URL")
 
 
 def get_info(url):
-    validate_url(url)
+    url = validate_url(url, has_proxy=bool(get_proxy_url()))
 
     if is_tiktok_url(url):
         tk = fetch_tiktok_via_api(url)
@@ -384,35 +378,69 @@ def get_info(url):
         return {
             "type": "playlist",
             "title": info.get("title") or "Playlist",
-            "uploader": info.get("uploader"),
+            "uploader": info.get("uploader") or "Playlist",
+            "thumbnail": info.get("thumbnail") or (entries[0].get("thumbnail") if entries else None),
             "entries": entries,
             "count": len(entries),
         }
 
     formats = []
+    seen_keys = set()
     for f in info.get("formats", []):
-        ext = f.get("ext") or ""
+        ext = (f.get("ext") or "").lower()
         if ext in ("mhtml", "none") or f.get("vcodec") == "images":
             continue
-        if f.get("url") and (f.get("height") or f.get("acodec") != "none"):
-            formats.append({
-                "format_id": f.get("format_id"),
-                "ext": ext,
-                "height": f.get("height"),
-                "filesize": f.get("filesize") or f.get("filesize_approx"),
-                "note": f.get("format_note"),
-                "has_audio": f.get("acodec") != "none",
-            })
+        has_url = bool(f.get("url") or f.get("manifest_url"))
+        has_video = bool(f.get("height") or (f.get("vcodec") and f.get("vcodec") != "none"))
+        has_audio = bool(f.get("acodec") and f.get("acodec") != "none")
+        if not has_url or not (has_video or has_audio):
+            continue
 
-    formats.sort(key=lambda x: (x.get("height") or 0, 1 if x.get("has_audio") else 0), reverse=True)
+        height = f.get("height")
+        fid = str(f.get("format_id"))
+        dedup_key = (height, ext, has_audio, f.get("format_note") or "")
+        if dedup_key in seen_keys and height:
+            continue
+        seen_keys.add(dedup_key)
+
+        formats.append({
+            "format_id": fid,
+            "ext": ext or "mp4",
+            "height": height,
+            "filesize": f.get("filesize") or f.get("filesize_approx"),
+            "note": f.get("format_note") or ("Audio Only" if not has_video else "Video"),
+            "has_audio": has_audio,
+            "has_video": has_video,
+        })
+
+    formats.sort(
+        key=lambda x: (
+            1 if x.get("has_video") else 0,
+            x.get("height") or 0,
+            1 if x.get("has_audio") else 0,
+            x.get("filesize") or 0,
+        ),
+        reverse=True,
+    )
+
+    if not formats:
+        formats.append({
+            "format_id": "best",
+            "ext": "mp4",
+            "height": 720,
+            "filesize": None,
+            "note": "Best Available Quality",
+            "has_audio": True,
+            "has_video": True,
+        })
 
     return {
         "type": "video",
-        "title": info.get("title"),
+        "title": info.get("title") or "Media",
         "thumbnail": info.get("thumbnail"),
         "duration": info.get("duration"),
-        "uploader": info.get("uploader"),
-        "formats": formats[:60],
+        "uploader": info.get("uploader") or info.get("channel") or "Unknown",
+        "formats": formats[:40],
     }
 
 
@@ -444,12 +472,12 @@ def _stream_download_to_file(media_url, filepath, headers=None):
 
 
 def download_media(url, format_id="best", audio=False):
-    validate_url(url)
+    url = validate_url(url, has_proxy=bool(get_proxy_url()))
     unique_prefix = uuid.uuid4().hex[:8]
 
     if is_tiktok_url(url):
         tk = fetch_tiktok_via_api(url)
-        vid_id = tk.get("id") or "video"
+        vid_id = sanitize_filename(str(tk.get("id") or "video"))
 
         if audio or format_id == "audio":
             media_url = tk.get("music") or tk.get("play") or tk.get("hdplay")
@@ -473,8 +501,8 @@ def download_media(url, format_id="best", audio=False):
 
     if audio:
         selected_format = "bestaudio/best"
-    elif format_id and format_id != "best":
-        selected_format = f"{format_id}+bestaudio/{format_id}/best"
+    elif format_id and format_id != "best" and not str(format_id).startswith("piped_"):
+        selected_format = f"{format_id}+bestaudio/{format_id}/bestvideo+bestaudio/best"
     else:
         selected_format = "bestvideo+bestaudio/best"
 
@@ -483,8 +511,8 @@ def download_media(url, format_id="best", audio=False):
         "outtmpl": os.path.join(DOWNLOAD_DIR, f"{unique_prefix}_%(extractor)s_%(id)s.%(ext)s"),
         "format": selected_format,
         "noplaylist": True,
-        "quiet": False,
-        "no_warnings": False,
+        "quiet": True,
+        "no_warnings": True,
         "restrictfilenames": True,
         "windowsfilenames": True,
         "overwrites": True,
@@ -495,7 +523,7 @@ def download_media(url, format_id="best", audio=False):
         "continuedl": True,
         "nopart": False,
         "merge_output_format": "mp4",
-        "max_filesize": 500 * 1024 * 1024,
+        "max_filesize": int(os.getenv("MAX_DOWNLOAD_MB", "500")) * 1024 * 1024,
     })
 
     if audio:
@@ -507,8 +535,7 @@ def download_media(url, format_id="best", audio=False):
 
     info = extract_with_fallback(url, options, download=True)
 
-    # Handle public API fallback direct stream download
-    if info.get("_via_public_api"):
+    if info and info.get("_via_public_api"):
         fmts = info.get("formats", [])
         chosen = None
         if audio:
@@ -520,13 +547,14 @@ def download_media(url, format_id="best", audio=False):
         if not chosen or not chosen.get("url"):
             raise ValueError("No downloadable stream found from backup API")
         ext = "m4a" if audio else (chosen.get("ext") or "mp4")
-        filepath = os.path.join(DOWNLOAD_DIR, f"{unique_prefix}_youtube_{info.get('id', 'video')}.{ext}")
+        vid_id = sanitize_filename(str(info.get("id") or "video"))
+        filepath = os.path.join(DOWNLOAD_DIR, f"{unique_prefix}_youtube_{vid_id}.{ext}")
         return _stream_download_to_file(chosen["url"], filepath)
 
     for fname in os.listdir(DOWNLOAD_DIR):
         if fname.startswith(unique_prefix) and not fname.endswith((".part", ".ytdl")):
             filepath = os.path.join(DOWNLOAD_DIR, fname)
-            if os.path.isfile(filepath):
+            if os.path.isfile(filepath) and os.path.getsize(filepath) > 0:
                 return filepath
 
-    raise FileNotFoundError("Downloaded file could not be located")
+    raise FileNotFoundError("Downloaded file could not be located on server")

@@ -2,16 +2,29 @@ const $ = id => document.getElementById(id);
 let mediaUrl = "";
 let playlistEntries = [];
 
+function formatBytes(bytes) {
+    if (!bytes || isNaN(bytes)) return "";
+    const mb = bytes / (1024 * 1024);
+    return mb >= 1 ? ` · ${mb.toFixed(1)} MB` : ` · ${(bytes / 1024).toFixed(0)} KB`;
+}
+
+function formatDuration(sec) {
+    if (!sec || isNaN(sec)) return "";
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return ` · ${m}:${s < 10 ? "0" : ""}${s}`;
+}
+
 $("inspect").addEventListener("click", async () => {
     mediaUrl = $("url").value.trim();
 
     if (!mediaUrl) {
-        $("status").textContent = "Please enter a URL.";
+        $("status").textContent = "Please enter a valid URL.";
         return;
     }
 
     $("inspect").disabled = true;
-    $("status").textContent = "Analyzing media...";
+    $("status").textContent = "Analyzing media... Please wait.";
     $("result").classList.add("hidden");
 
     try {
@@ -25,9 +38,14 @@ $("inspect").addEventListener("click", async () => {
         if (!response.ok) throw new Error(data.detail || "Analysis failed");
 
         $("title").textContent = data.title || "Untitled media";
-        $("thumbnail").src = data.thumbnail || "";
+        if (data.thumbnail) {
+            $("thumbnail").src = data.thumbnail;
+            $("thumbnail").style.display = "block";
+        } else {
+            $("thumbnail").style.display = "none";
+        }
         $("details").textContent =
-            "Uploader: " + (data.uploader || "Unknown");
+            "Uploader: " + (data.uploader || "Unknown") + formatDuration(data.duration);
 
         const isPlaylist = data.type === "playlist";
 
@@ -41,24 +59,36 @@ $("inspect").addEventListener("click", async () => {
         } else {
             $("format").innerHTML = "";
 
+            const bestOpt = document.createElement("option");
+            bestOpt.value = "best";
+            bestOpt.textContent = "Auto Best Quality (MP4 + Audio Merged)";
+            $("format").appendChild(bestOpt);
+
             (data.formats || []).forEach(f => {
+                if (f.format_id === "best") return;
                 const option = document.createElement("option");
                 option.value = f.format_id;
-                option.textContent =
-                    (f.height ? f.height + "p · " : "") +
-                    (f.ext || "media") + " · " +
-                    (f.note || f.format_id);
+                const res = f.height ? `${f.height}p` : "Audio";
+                const audioTag = f.has_video === false ? "Audio Only" : (f.has_audio ? "Video+Audio" : "HD Video (Auto-Audio)");
+                option.textContent = `${res} · ${(f.ext || "mp4").toUpperCase()} · ${audioTag}${formatBytes(f.filesize)}`;
                 $("format").appendChild(option);
             });
         }
 
         $("result").classList.remove("hidden");
-        $("status").textContent = "Analysis complete.";
+        $("status").textContent = "Analysis complete. Ready to download.";
 
     } catch (error) {
-        $("status").textContent = error.message;
+        $("status").textContent = "Error: " + error.message;
     } finally {
         $("inspect").disabled = false;
+    }
+});
+
+$("url").addEventListener("keydown", e => {
+    if (e.key === "Enter") {
+        e.preventDefault();
+        $("inspect").click();
     }
 });
 
@@ -112,8 +142,8 @@ function getFilenameFromHeader(header, fallback) {
         } catch (_) {}
     }
 
-    const match = header.match(/filename\s*=\s*"([^"]+)"/i);
-    if (match) return match[1];
+    const match = header.match(/filename\s*=\s*"?([^";]+)"?/i);
+    if (match) return match[1].trim();
 
     return fallback;
 }
@@ -130,8 +160,12 @@ async function downloadOne(url, audio, formatId = "best") {
     });
 
     if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.detail || "Download failed");
+        let errText = "Download failed";
+        try {
+            const error = await response.json();
+            errText = error.detail || errText;
+        } catch (_) {}
+        throw new Error(errText);
     }
 
     const blob = await response.blob();
@@ -153,13 +187,20 @@ async function downloadOne(url, audio, formatId = "best") {
 }
 
 async function downloadSingle(audio) {
-    $("status").textContent = "Preparing download...";
+    $("videoDownload").disabled = true;
+    $("audioDownload").disabled = true;
+    $("status").textContent = audio
+        ? "Extracting & converting MP3... Please wait."
+        : "Downloading & merging video... Please wait.";
 
     try {
         await downloadOne(mediaUrl, audio, $("format").value || "best");
-        $("status").textContent = "Download started.";
+        $("status").textContent = "Download completed!";
     } catch (error) {
-        $("status").textContent = error.message;
+        $("status").textContent = "Error: " + error.message;
+    } finally {
+        $("videoDownload").disabled = false;
+        $("audioDownload").disabled = false;
     }
 }
 
