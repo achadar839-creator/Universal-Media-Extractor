@@ -162,7 +162,7 @@ def fetch_youtube_via_public_api(url):
     ]
     for inv_api in invidious_instances:
         try:
-            r = requests.get(inv_api, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
+            r = requests.get(inv_api, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "Origin": "https://cobalt.tools", "Referer": "https://cobalt.tools/"}, timeout=5)
             if r.status_code == 200:
                 idata = r.json()
                 formats = []
@@ -213,16 +213,16 @@ def fetch_youtube_via_public_api(url):
 
     # 2. Cobalt public API instances
     cobalt_instances = [
-        "https://api.cobalt.tools/",
-        "https://cobalt-api.kwiatekmiki.com/",
+        "https://co.wuk.sh/api/json",
+        "https://cobalt.qwy2.dev/api/json",
         "https://cobalt.api.timelessnesses.me/",
     ]
     for c_api in cobalt_instances:
         try:
             r = requests.post(
                 c_api,
-                json={"url": clean_watch_url, "videoQuality": "max"},
-                headers={"Accept": "application/json", "Content-Type": "application/json", "User-Agent": "Mozilla/5.0"},
+                json={"url": clean_watch_url, "vQuality": "1080"},
+                headers={"Accept": "application/json", "Content-Type": "application/json", "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "Origin": "https://cobalt.tools", "Referer": "https://cobalt.tools/"},
                 timeout=5,
             )
             if r.status_code == 200:
@@ -259,7 +259,7 @@ def fetch_youtube_via_public_api(url):
     ]
     for api in piped_instances:
         try:
-            r = requests.get(api, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
+            r = requests.get(api, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "Origin": "https://cobalt.tools", "Referer": "https://cobalt.tools/"}, timeout=5)
             if r.status_code == 200:
                 data = r.json()
                 if data.get("videoStreams") or data.get("audioStreams"):
