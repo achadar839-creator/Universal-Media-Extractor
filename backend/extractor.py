@@ -151,7 +151,65 @@ def fetch_youtube_via_public_api(url):
     vid_id = m.group(1)
     clean_watch_url = f"https://www.youtube.com/watch?v={vid_id}"
 
-    # 1. Try Cobalt public API instances (best for Render / Cloud IPs)
+    # 0. Try Invidious public API instances (no cookies needed, works on cloud IPs)
+    invidious_instances = [
+        f"https://inv.nadeko.net/api/v1/videos/{vid_id}",
+        f"https://invidious.nerdvpn.de/api/v1/videos/{vid_id}",
+        f"https://iv.datura.network/api/v1/videos/{vid_id}",
+        f"https://invidious.privacyredirect.com/api/v1/videos/{vid_id}",
+    ]
+    for inv_api in invidious_instances:
+        try:
+            r = requests.get(inv_api, headers={"User-Agent": "Mozilla/5.0"}, timeout=6)
+            if r.status_code == 200:
+                idata = r.json()
+                formats = []
+                for idx, fs in enumerate(idata.get("formatStreams", [])):
+                    if not fs.get("url"):
+                        continue
+                    q = str(fs.get("qualityLabel") or fs.get("resolution") or "")
+                    hm = re.search(r"(\d+)p", q)
+                    height = int(hm.group(1)) if hm else 360
+                    formats.append({
+                        "format_id": f"inv_f_{idx}_{height}",
+                        "url": fs.get("url"),
+                        "ext": "mp4",
+                        "height": height,
+                        "filesize": None,
+                        "format_note": q or "Video + Audio",
+                        "vcodec": "h264",
+                        "acodec": "aac",
+                    })
+                for idx, af in enumerate(idata.get("adaptiveFormats", [])):
+                    if not af.get("url"):
+                        continue
+                    mime = af.get("type") or ""
+                    if "audio/" in mime:
+                        formats.append({
+                            "format_id": f"inv_a_{idx}",
+                            "url": af.get("url"),
+                            "ext": "m4a",
+                            "height": None,
+                            "filesize": af.get("clen"),
+                            "format_note": "Audio",
+                            "vcodec": "none",
+                            "acodec": "aac",
+                        })
+                if formats:
+                    return {
+                        "id": vid_id,
+                        "extractor": "youtube",
+                        "title": idata.get("title") or f"YouTube_{vid_id}",
+                        "thumbnail": f"https://i.ytimg.com/vi/{vid_id}/hqdefault.jpg",
+                        "duration": idata.get("lengthSeconds"),
+                        "uploader": idata.get("author") or "YouTube",
+                        "formats": formats,
+                        "_via_public_api": True,
+                    }
+        except Exception:
+            continue
+
+    # 1. Try Cobalt public API instances
     cobalt_instances = [
         "https://api.cobalt.tools/",
         "https://cobalt-api.kwiatekmiki.com/",
@@ -251,7 +309,7 @@ def fetch_youtube_via_public_api(url):
         except Exception:
             continue
 
-    raise ValueError("Cloud IP blocked by YouTube. Add youtube-cookies.txt in Render Secrets for 100% uptime.")
+    raise ValueError("YouTube server temporarily busy. Please try again in a few seconds.")
 
 
 def base_options():
