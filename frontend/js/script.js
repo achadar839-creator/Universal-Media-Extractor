@@ -175,12 +175,7 @@ async function downloadOne(url, audio, formatId = "best") {
     );
 
     const objectUrl = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = objectUrl;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
+    window.location.href = downloadUrl;
 
     setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
 }

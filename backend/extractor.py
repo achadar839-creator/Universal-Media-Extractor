@@ -497,6 +497,22 @@ def get_info(url):
             "has_video": True,
         })
 
+    # --- SAFE CLEANUP ---
+    clean_formats = []
+    for fmt in formats:
+        h = fmt.get("height")
+        try:
+            h_int = int(h) if h else 0
+        except Exception:
+            h_int = 0
+        e_str = str(fmt.get("ext", "")).lower()
+        n_str = str(fmt.get("note", "") or fmt.get("format_note", "")).lower()
+        fid_str = str(fmt.get("format_id", "")).lower()
+        if (0 < h_int < 144) or e_str == "mhtml" or "storyboard" in n_str or "auto-audio" in n_str or "storyboard" in fid_str:
+            continue
+        clean_formats.append(fmt)
+    formats = clean_formats
+
     formats.sort(
         key=lambda x: (
             x.get("height") or 0,
@@ -512,7 +528,7 @@ def get_info(url):
         "thumbnail": info.get("thumbnail"),
         "duration": info.get("duration"),
         "uploader": info.get("uploader") or info.get("channel") or "Unknown",
-        "formats": formats[:30],
+        "formats": formats[:100],
     }
 
 
