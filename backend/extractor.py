@@ -6,7 +6,6 @@ import uuid
 import socket
 import requests
 from yt_dlp import YoutubeDL
-from yt_dlp.utils import DownloadError
 from backend.security import is_tiktok_url, is_youtube_url, validate_url, sanitize_filename
 
 DOWNLOAD_DIR = "downloads"
@@ -41,7 +40,7 @@ def _resolve_cookie_file():
 
 def is_tor_running(host="127.0.0.1", port=9050):
     try:
-        with socket.create_connection((host, port), timeout=1.5):
+        with socket.create_connection((host, port), timeout=1.0):
             return True
     except OSError:
         return False
@@ -83,19 +82,18 @@ def fetch_tiktok_via_api(url):
     }
 
     last_error = None
-    for attempt in range(3):
+    for attempt in range(2):
         try:
             response = requests.post(
                 api_url,
                 data={"url": url, "hd": 1},
                 headers=headers,
-                timeout=(10, 35),
+                timeout=(8, 25),
             )
             response.raise_for_status()
             result = response.json()
             if result.get("code") == 0 and result.get("data"):
                 data = result["data"]
-                # Normalize relative paths from TikWM
                 for key in ("hdplay", "play", "wmplay", "music", "cover"):
                     val = data.get(key)
                     if isinstance(val, str) and val.startswith("/"):
@@ -104,8 +102,8 @@ def fetch_tiktok_via_api(url):
             last_error = result.get("msg") or "TikWM returned no video data"
         except Exception as exc:
             last_error = str(exc)
-        if attempt < 2:
-            time.sleep(1.5)
+        if attempt == 0:
+            time.sleep(1.0)
 
     try:
         opts = base_options()
@@ -151,7 +149,7 @@ def fetch_youtube_via_public_api(url):
     vid_id = m.group(1)
     clean_watch_url = f"https://www.youtube.com/watch?v={vid_id}"
 
-    # 0. Try Invidious public API instances (no cookies needed, works on cloud IPs)
+    # 1. Invidious public API instances (cookie-free cloud support)
     invidious_instances = [
         f"https://inv.nadeko.net/api/v1/videos/{vid_id}",
         f"https://invidious.nerdvpn.de/api/v1/videos/{vid_id}",
@@ -160,7 +158,7 @@ def fetch_youtube_via_public_api(url):
     ]
     for inv_api in invidious_instances:
         try:
-            r = requests.get(inv_api, headers={"User-Agent": "Mozilla/5.0"}, timeout=6)
+            r = requests.get(inv_api, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
             if r.status_code == 200:
                 idata = r.json()
                 formats = []
@@ -209,7 +207,7 @@ def fetch_youtube_via_public_api(url):
         except Exception:
             continue
 
-    # 1. Try Cobalt public API instances
+    # 2. Cobalt public API instances
     cobalt_instances = [
         "https://api.cobalt.tools/",
         "https://cobalt-api.kwiatekmiki.com/",
@@ -245,22 +243,19 @@ def fetch_youtube_via_public_api(url):
                             "acodec": "aac",
                         }],
                         "_via_public_api": True,
-                        "_cobalt_url": clean_watch_url,
                     }
         except Exception:
             continue
 
-    # 2. Try Piped / Invidious public instances
+    # 3. Piped public instances
     piped_instances = [
         f"https://pipedapi.kavin.rocks/streams/{vid_id}",
         f"https://pipedapi.adminforge.de/streams/{vid_id}",
         f"https://api.piped.private.coffee/streams/{vid_id}",
-        f"https://pipedapi.darkness.services/streams/{vid_id}",
     ]
-    headers = {"User-Agent": "Mozilla/5.0"}
     for api in piped_instances:
         try:
-            r = requests.get(api, headers=headers, timeout=12)
+            r = requests.get(api, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
             if r.status_code == 200:
                 data = r.json()
                 if data.get("videoStreams") or data.get("audioStreams"):
@@ -309,14 +304,14 @@ def fetch_youtube_via_public_api(url):
         except Exception:
             continue
 
-    raise ValueError("YouTube server temporarily busy. Please try again in a few seconds.")
+    raise ValueError("YouTube server temporarily busy on cloud IP. Please retry in a few seconds.")
 
 
 def base_options():
     options = {
         "quiet": True,
         "no_warnings": True,
-        "socket_timeout": 10,
+        "socket_timeout": 12,
         "extractor_retries": 1,
         "geo_bypass": True,
         "nocheckcertificate": True,
@@ -340,10 +335,6 @@ def extract_with_fallback(url, options, download=False):
     last_error = None
     cookie_file = _resolve_cookie_file()
 
-    yt_profiles = [
-        {"player_client": ["android_vr", "ios"]},
-    ]
-
     if is_youtube_url(url):
         if cookie_file:
             try:
@@ -357,18 +348,15 @@ def extract_with_fallback(url, options, download=False):
             except Exception as e:
                 last_error = e
 
-        for yt_arg in yt_profiles:
-            try:
-                try_opts = dict(options)
-                try_opts["extractor_args"] = {"youtube": yt_arg}
-                with YoutubeDL(try_opts) as ydl:
-                    info = ydl.extract_info(url, download=download)
-                if download or _has_playable_media(info):
-                    return info
-                last_error = ValueError("No playable formats returned by client profile")
-            except Exception as e:
-                last_error = e
-                continue
+        try:
+            try_opts = dict(options)
+            try_opts["extractor_args"] = {"youtube": {"player_client": ["android_vr", "ios"]}}
+            with YoutubeDL(try_opts) as ydl:
+                info = ydl.extract_info(url, download=download)
+            if download or _has_playable_media(info):
+                return info
+        except Exception as e:
+            last_error = e
 
     try:
         default_opts = dict(options)
@@ -489,7 +477,6 @@ def get_info(url):
         has_url = bool(f.get("url") or f.get("manifest_url"))
         has_video = bool(f.get("height") or (f.get("vcodec") and f.get("vcodec") != "none"))
         has_audio = bool(f.get("acodec") and f.get("acodec") != "none")
-        # Only keep video formats in dropdown (audio is handled by DOWNLOAD MP3 button)
         if not has_url or not has_video or not f.get("height"):
             continue
 
@@ -530,6 +517,7 @@ def get_info(url):
 
 
 def _stream_download_to_file(media_url, filepath, headers=None):
+    session = requests.Session()
     req_headers = {
         "User-Agent": "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36",
         "Accept": "*/*",
@@ -537,16 +525,16 @@ def _stream_download_to_file(media_url, filepath, headers=None):
     if headers:
         req_headers.update(headers)
     try:
-        r = requests.get(media_url, stream=True, headers=req_headers, timeout=30, allow_redirects=True)
+        r = session.get(media_url, stream=True, headers=req_headers, timeout=25, allow_redirects=True)
         r.raise_for_status()
     except Exception:
         proxy = get_proxy_url()
-        r = requests.get(
+        r = session.get(
             media_url,
             stream=True,
             headers=req_headers,
             proxies={"http": proxy, "https": proxy} if proxy else None,
-            timeout=60,
+            timeout=45,
             allow_redirects=True,
         )
         r.raise_for_status()
@@ -579,7 +567,6 @@ def download_media(url, format_id="best", audio=False):
         candidates = [c for c in candidates if c]
         filepath = os.path.join(DOWNLOAD_DIR, f"{unique_prefix}_TikTok_{vid_id}.{ext}")
 
-        # Try direct stream from TikWM/CDN candidates with proper TikTok Referer
         for media_url in candidates:
             try:
                 _stream_download_to_file(
@@ -592,7 +579,6 @@ def download_media(url, format_id="best", audio=False):
             except Exception:
                 continue
 
-        # Fallback: let yt-dlp download TikTok directly if CDN returned 403
         yt_opts = base_options()
         yt_opts.update({
             "outtmpl": os.path.join(DOWNLOAD_DIR, f"{unique_prefix}_TikTok_{vid_id}.%(ext)s"),
@@ -608,11 +594,11 @@ def download_media(url, format_id="best", audio=False):
                 fp = os.path.join(DOWNLOAD_DIR, fname)
                 if os.path.isfile(fp) and os.path.getsize(fp) > 0:
                     return fp
-        raise ValueError("TikTok CDN blocked direct download (403) and yt-dlp fallback failed")
+        raise ValueError("TikTok download blocked by CDN (403)")
 
     if audio:
         selected_format = "bestaudio/best"
-    elif format_id and format_id != "best" and not str(format_id).startswith(("piped_", "cobalt_")):
+    elif format_id and format_id != "best" and not str(format_id).startswith(("piped_", "cobalt_", "inv_")):
         selected_format = f"{format_id}+bestaudio/{format_id}/bestvideo+bestaudio/best"
     else:
         selected_format = "bestvideo+bestaudio/best"
@@ -627,10 +613,10 @@ def download_media(url, format_id="best", audio=False):
         "restrictfilenames": True,
         "windowsfilenames": True,
         "overwrites": True,
-        "retries": 10,
-        "fragment_retries": 10,
-        "file_access_retries": 5,
-        "socket_timeout": 10,
+        "retries": 5,
+        "fragment_retries": 5,
+        "file_access_retries": 3,
+        "socket_timeout": 15,
         "continuedl": True,
         "nopart": False,
         "merge_output_format": "mp4",
