@@ -163,7 +163,7 @@ def fetch_youtube_via_public_api(url):
                 c_api,
                 json={"url": clean_watch_url, "videoQuality": "720"},
                 headers={"Accept": "application/json", "Content-Type": "application/json", "User-Agent": "Mozilla/5.0"},
-                timeout=12,
+                timeout=5,
             )
             if r.status_code == 200:
                 cdata = r.json()
@@ -258,8 +258,8 @@ def base_options():
     options = {
         "quiet": True,
         "no_warnings": True,
-        "socket_timeout": 30,
-        "extractor_retries": 3,
+        "socket_timeout": 10,
+        "extractor_retries": 1,
         "geo_bypass": True,
         "nocheckcertificate": True,
         "remote_components": ["ejs:github"],
@@ -283,9 +283,7 @@ def extract_with_fallback(url, options, download=False):
     cookie_file = _resolve_cookie_file()
 
     yt_profiles = [
-        {"player_client": ["android_vr", "tv"]},
-        {"player_client": ["tv", "mweb"]},
-        {"player_client": ["ios", "web_safari"]},
+        {"player_client": ["android_vr", "ios"]},
     ]
 
     if is_youtube_url(url):
@@ -574,7 +572,7 @@ def download_media(url, format_id="best", audio=False):
         "retries": 10,
         "fragment_retries": 10,
         "file_access_retries": 5,
-        "socket_timeout": 30,
+        "socket_timeout": 10,
         "continuedl": True,
         "nopart": False,
         "merge_output_format": "mp4",
