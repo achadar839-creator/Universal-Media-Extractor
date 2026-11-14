@@ -150,23 +150,41 @@ function getFilenameFromHeader(header, fallback) {
 }
 
 async function downloadOne(url, audio, formatId = "best") {
-    const params = new URLSearchParams({
-        url: url,
-        format_id: formatId,
-        audio: audio
+    const response = await fetch("/api/download", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+            url: url,
+            format_id: formatId,
+            audio: audio
+        })
     });
-    
-    const downloadUrl = "/api/download?" + params.toString();
-    
-    // Direct link click to trigger Android Native Notification Download
+
+    if (!response.ok) {
+        let errText = "Download failed";
+        try {
+            const error = await response.json();
+            errText = error.detail || errText;
+        } catch (_) {}
+        throw new Error(errText);
+    }
+
+    const blob = await response.blob();
+    const fallback = audio ? "media.mp3" : "media.mp4";
+    const filename = getFilenameFromHeader(
+        response.headers.get("Content-Disposition"),
+        fallback
+    );
+
+    const objectUrl = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = downloadUrl;
+    a.href = objectUrl;
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     a.remove();
-    
-    // Thoda delay taki server ko request mil jaye
-    await new Promise(r => setTimeout(r, 1500));
+
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
 }
 
 async function downloadSingle(audio) {
