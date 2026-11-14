@@ -221,7 +221,7 @@ def fetch_youtube_via_public_api(url):
         try:
             r = requests.post(
                 c_api,
-                json={"url": get_edge_matrix_url(clean_watch_url), "videoQuality": "max"},
+                json={"url": clean_watch_url, "videoQuality": "max"},
                 headers={"Accept": "application/json", "Content-Type": "application/json", "User-Agent": "Mozilla/5.0"},
                 timeout=5,
             )
