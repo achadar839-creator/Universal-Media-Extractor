@@ -11,16 +11,13 @@ app = FastAPI(title="Universal Media Extractor")
 
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
-
 class URLRequest(BaseModel):
     url: str
-
 
 class DownloadRequest(BaseModel):
     url: str
     format_id: str = "best"
     audio: bool = False
-
 
 def remove_file(path: str):
     try:
@@ -29,11 +26,9 @@ def remove_file(path: str):
     except OSError:
         pass
 
-
 @app.get("/")
 async def home():
     return FileResponse("frontend/index.html")
-
 
 @app.post("/api/info")
 async def info(data: URLRequest):
@@ -41,7 +36,6 @@ async def info(data: URLRequest):
         return await asyncio.to_thread(get_info, data.url.strip())
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-
 
 @app.post("/api/download")
 async def download(data: DownloadRequest, background_tasks: BackgroundTasks):
@@ -67,7 +61,6 @@ async def download(data: DownloadRequest, background_tasks: BackgroundTasks):
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-
 
 @app.get("/api/health")
 async def health():

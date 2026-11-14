@@ -17,7 +17,6 @@ function formatDuration(sec) {
 
 $("inspect").addEventListener("click", async () => {
     mediaUrl = $("url").value.trim();
-
     if (!mediaUrl) {
         $("status").textContent = "Please enter a valid URL.";
         return;
@@ -66,6 +65,7 @@ $("inspect").addEventListener("click", async () => {
 
             let sortedFormats = data.formats || [];
             sortedFormats.sort((a, b) => b.height - a.height);
+
             sortedFormats.forEach(f => {
                 if (f.format_id === "best" || f.format_id === "audio" || f.has_video === false || !f.height) return;
                 const option = document.createElement("option");
@@ -75,10 +75,8 @@ $("inspect").addEventListener("click", async () => {
                 $("format").appendChild(option);
             });
         }
-
         $("result").classList.remove("hidden");
         $("status").textContent = "Analysis complete. Ready to download.";
-
     } catch (error) {
         $("status").textContent = "Error: " + error.message;
     } finally {
@@ -121,7 +119,6 @@ function renderPlaylist() {
 function updateSelectedCount() {
     const checks = [...document.querySelectorAll(".video-check")];
     const selected = checks.filter(c => c.checked).length;
-
     $("selectedCount").textContent = selected + " selected";
     $("selectAll").checked = checks.length > 0 && selected === checks.length;
 }
@@ -135,17 +132,14 @@ $("selectAll").addEventListener("change", () => {
 
 function getFilenameFromHeader(header, fallback) {
     if (!header) return fallback;
-
     const utf8Match = header.match(/filename\*\s*=\s*UTF-8''([^;]+)/i);
     if (utf8Match) {
         try {
             return decodeURIComponent(utf8Match[1].trim().replace(/^["']|["']$/g, ""));
         } catch (_) {}
     }
-
     const match = header.match(/filename\s*=\s*"?([^";]+)"?/i);
     if (match) return match[1].trim();
-
     return fallback;
 }
 
@@ -235,14 +229,14 @@ async function downloadSelected(audio) {
             failures.push(entry.title + ": " + error.message);
         }
     }
-
+    
     $("downloadSelected").disabled = false;
     $("downloadSelectedAudio").disabled = false;
-
+    
     $("status").textContent =
         "Completed: " + completed + " / " + selected.length +
         (failures.length ? " · Failed: " + failures.length : "");
-
+    
     if (failures.length) {
         console.error("Download errors:", failures);
     }
@@ -250,6 +244,5 @@ async function downloadSelected(audio) {
 
 $("videoDownload").addEventListener("click", () => downloadSingle(false));
 $("audioDownload").addEventListener("click", () => downloadSingle(true));
-
 $("downloadSelected").addEventListener("click", () => downloadSelected(false));
 $("downloadSelectedAudio").addEventListener("click", () => downloadSelected(true));
