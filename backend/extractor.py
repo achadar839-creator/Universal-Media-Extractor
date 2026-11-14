@@ -1,3 +1,7 @@
+
+def get_edge_matrix_url(target_url):
+    edge_url = "https://patient-truth-5ae3.mutantsuperheros.workers.dev/?target="
+    return edge_url + target_url
 import os
 import re
 import time
@@ -217,7 +221,7 @@ def fetch_youtube_via_public_api(url):
         try:
             r = requests.post(
                 c_api,
-                json={"url": clean_watch_url, "videoQuality": "max"},
+                json={"url": get_edge_matrix_url(clean_watch_url), "videoQuality": "max"},
                 headers={"Accept": "application/json", "Content-Type": "application/json", "User-Agent": "Mozilla/5.0"},
                 timeout=5,
             )
