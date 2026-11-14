@@ -43,14 +43,15 @@ async def info(data: URLRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.post("/api/download")
-async def download(data: DownloadRequest, background_tasks: BackgroundTasks):
+@app.get("/api/download")
+async def download(background_tasks: BackgroundTasks, url: str, format_id: str = "best", audio: str = "false"):
     try:
+        is_audio = audio.lower() == 'true'
         filepath = await asyncio.to_thread(
             download_media,
-            data.url.strip(),
-            data.format_id or "best",
-            data.audio,
+            url.strip(),
+            format_id,
+            is_audio,
         )
 
         clean_name = os.path.basename(filepath)
