@@ -1,0 +1,24 @@
+name: Ghost Engine Downloader
+on:
+  repository_dispatch:
+    types: [trigger_ghost]
+jobs:
+  ghost-process:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Booting Ghost Node
+        run: echo "Ghost Node Activated from Render!"
+      
+      - name: Install yt-dlp & FFmpeg
+        run: |
+          sudo apt-get update && sudo apt-get install -y ffmpeg
+          sudo wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O /usr/local/bin/yt-dlp
+          sudo chmod a+rx /usr/local/bin/yt-dlp
+      
+      - name: Download & Merge Heavy Media
+        run: yt-dlp -f "bestvideo+bestaudio" "${{ github.event.client_payload.url }}" -o "ghost_media.mp4"
+      
+      - name: Upload to Temporary Cloud Matrix
+        run: |
+          echo "Transferring file to secure edge node..."
+          curl -F "file=@ghost_media.mp4" https://bashupload.com
