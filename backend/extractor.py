@@ -659,7 +659,10 @@ def download_media(url, format_id="best", audio=False):
             "preferredquality": "192",
         }]
 
-    info = extract_with_fallback(url, options, download=True)
+    if format_id and str(format_id).startswith(("piped_", "cobalt_", "inv_")):
+        info = fetch_youtube_via_public_api(url)
+    else:
+        info = extract_with_fallback(url, options, download=True)
 
     if info and info.get("_via_public_api"):
         fmts = info.get("formats", [])
