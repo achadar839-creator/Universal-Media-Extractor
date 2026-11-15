@@ -1,6 +1,6 @@
 fastapi
 uvicorn
-yt-dlp[default]
+yt-dlp
 python-multipart
 python-dotenv
 pydantic
