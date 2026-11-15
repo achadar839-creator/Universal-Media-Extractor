@@ -37,6 +37,7 @@ www.tiktok.com	FALSE	/	FALSE	1802489991	last_login_method	google
 www.tiktok.com	FALSE	/	FALSE	1802490114	msToken	XkotbiHrTpszlD_Ch-ODSQO3l84QCWIOw0yZ7O4EgqJC4Dbzu2s6uzg_Z0FaD9ppBf_G0d7tcteV-YIxjh6fGIzp5GEtLN-xhdli0e7tbivB-6G2xgDlxiKxzU6OsHObB4yCNVyww-JTtdv7blKW0hRUcHhd
 ydl_opts = {
     'format': 'best',
+        'cookiefile': 'cookies.txt',
     # बस ये नीचे वाली 3 लाइनें जोड़नी हैं (कॉमा और स्पेस का ध्यान रखना):
     'http_headers': {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'
